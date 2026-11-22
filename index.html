@@ -19,6 +19,7 @@
     background:radial-gradient(120% 120% at 50% 35%,#ffffff 0%,#f1f0ee 45%,#d9d7d3 100%)}
   .screen{position:absolute;inset:0;display:none}
   .screen.on{display:block}
+  #s-roll,#s-view{background:#0e0d0c}
 
   /* ================= camera ================= */
   #wrap{position:absolute;aspect-ratio:1627/1013}
@@ -132,6 +133,12 @@
   .overlay img{max-width:100%;max-height:78%;object-fit:contain}
   .overlay p{font-size:13px;color:var(--dim);margin:0;text-align:center}
   input[type=file]{display:none}
+  /* upright phone layout for roll and editor */
+  #rig.tall #s-view .main{flex-direction:column}
+  #rig.tall #stage{flex:1 1 auto;min-height:0}
+  #rig.tall #panel{width:auto;border-left:0;border-top:1px solid var(--line);flex:0 0 auto;max-height:52%;overflow:hidden}
+  #rig.tall #gridIn{grid-template-columns:repeat(3,minmax(0,1fr))}
+  #rig.tall #gridIn img,#rig.tall #gridIn .pend{aspect-ratio:1}
 </style>
 </head>
 <body>
@@ -259,9 +266,13 @@ const rig = $("rig");
 let VW = 0, VH = 0;
 function layoutRig(){
   VW = innerWidth; VH = innerHeight;
+  const onCam = $("s-cam").classList.contains("on");
   const portrait = VH > VW * 1.05;
-  S.rot = portrait ? (S.flipped ? -90 : 90) : (S.flipped ? 180 : 0);
-  const W = portrait ? VH : VW, H = portrait ? VW : VH;
+  // only the camera body turns sideways; roll and editor stay upright
+  S.rot = !onCam ? 0 : portrait ? (S.flipped ? -90 : 90) : (S.flipped ? 180 : 0);
+  rig.classList.toggle("tall", !onCam && portrait);
+  const side = Math.abs(S.rot) === 90;
+  const W = side ? VH : VW, H = side ? VW : VH;
   rig.style.width = W + "px"; rig.style.height = H + "px";
   rig.style.transform =
     S.rot === 90  ? `translateX(${VW}px) rotate(90deg)` :
@@ -276,7 +287,7 @@ function layoutRig(){
   w.style.left = (W - cw)/2 + "px"; w.style.top = (H - ch)/2 + "px";
   document.documentElement.style.setProperty("--u", (cw / IW) + "px");
   // keep the live viewfinder upright on screen: undo the rig rotation
-  const ev=$("eyeVid"), eye=$("eye"), side=Math.abs(S.rot)===90;
+  const ev=$("eyeVid"), eye=$("eye");
   requestAnimationFrame(()=>{ const ew=eye.offsetWidth, eh=eye.offsetHeight;
     ev.style.width=(side?eh:ew)+"px"; ev.style.height=(side?ew:eh)+"px";
     ev.style.transform=`translate(-50%,-50%) rotate(${-S.rot}deg)`; });
@@ -299,7 +310,7 @@ function toRig(e){
 function rigLeft(el){ let x = 0; while (el && el !== rig) { x += el.offsetLeft; el = el.offsetParent; } return x; }
 
 function toast(m){ const t=$("toast"); t.textContent=m; t.classList.add("show"); clearTimeout(toast.t); toast.t=setTimeout(()=>t.classList.remove("show"),1900); }
-function show(id){ document.querySelectorAll(".screen").forEach(s=>s.classList.toggle("on", s.id===id)); }
+function show(id){ document.querySelectorAll(".screen").forEach(s=>s.classList.toggle("on", s.id===id)); if (typeof layoutRig==="function" && VW) layoutRig(); }
 /* tap helper that works on rotated pages without double firing */
 function tap(el, fn){ el.addEventListener("click", e => { e.stopPropagation(); fn(e); }); }
 
@@ -405,7 +416,7 @@ function fire(){
   audio();
   if (framesLeft()<=0){ toast(S.mode==="disp"?"Roll full. Tap DEVELOP.":"Roll full. Tap REWIND."); return; }
   sndShutter(); pressAnim();
-  if (S.flash && !(cam.ok===true && cam.torch)){ const f=$("flashfx"); f.classList.remove("go"); void f.offsetWidth; f.classList.add("go"); }
+  if (S.flash && cam.ok!==true){ screenFlash(); }
   // Never wait for the camera here: the file picker must open inside the same tap.
   if (cam.ok===true && cam.stream && cam.stream.active) { liveShot(); return; }
   $("capIn").click();
@@ -432,8 +443,36 @@ async function startCam(){
     const tr=st.getVideoTracks()[0]; cam.track=tr;
     try{ const c=tr.getCapabilities?tr.getCapabilities():{}; cam.torch=!!c.torch; }catch(e){ cam.torch=false; }
     if("ImageCapture" in window){ try{ cam.ic=new ImageCapture(tr); cam.caps=await cam.ic.getPhotoCapabilities().catch(()=>null); }catch(e){ cam.ic=null; } }
-    cam.ok=true; $("eye").classList.add("live"); return true;
+    cam.ok=true; $("eye").classList.add("live"); findTorchCamera(); return true;
   }catch(e){ cam.ok=false; $("eye").classList.remove("live"); return false; }
+}
+function screenFlash(){ const f=$("flashfx"); f.classList.remove("go"); void f.offsetWidth; f.classList.add("go"); }
+async function torch(on){
+  try{ await cam.track.applyConstraints({advanced:[{torch:on}]}); }catch(e){ return false; }
+  await new Promise(r=>setTimeout(r,60));
+  try{ const st=cam.track.getSettings(); return on ? st.torch===true : true; }catch(e){ return false; }
+}
+/* Find the back camera that owns the flash LED (Pixel has several back cameras) */
+async function findTorchCamera(){
+  try{
+    const caps=cam.track.getCapabilities?cam.track.getCapabilities():{};
+    if(caps.torch){ cam.torch=true; return; }
+    const devs=(await navigator.mediaDevices.enumerateDevices()).filter(d=>d.kind==="videoinput" && /back|rear|environment/i.test(d.label));
+    for(const d of devs){
+      if(cam.track.getSettings().deviceId===d.deviceId) continue;
+      let st=null;
+      try{ st=await navigator.mediaDevices.getUserMedia({audio:false,video:{deviceId:{exact:d.deviceId},width:{ideal:4032},height:{ideal:3024}}}); }catch(e){ continue; }
+      await new Promise(r=>setTimeout(r,400));
+      const t=st.getVideoTracks()[0], c=t.getCapabilities?t.getCapabilities():{};
+      if(c.torch){
+        cam.stream.getTracks().forEach(x=>x.stop());
+        cam.stream=st; cam.track=t; cam.torch=true; const v=$("eyeVid"); v.srcObject=st; try{ await v.play(); }catch(e){}
+        try{ cam.ic=("ImageCapture" in window)?new ImageCapture(t):null; cam.caps=cam.ic?await cam.ic.getPhotoCapabilities().catch(()=>null):null; }catch(e){ cam.ic=null; }
+        return;
+      }
+      st.getTracks().forEach(x=>x.stop());
+    }
+  }catch(e){}
 }
 /* Turn a captured frame so it is upright for the person holding the phone sideways */
 async function uprightBlob(blob){
@@ -458,21 +497,24 @@ function liveShot(){
   // reserve the frame now so fast presses never overshoot the roll
   const flash=S.flash;
   cam.busy=cam.busy.then(async()=>{
-    let blob=null;
-    const useTorch=flash&&cam.torch;
-    if(useTorch){
-      try{ await cam.track.applyConstraints({advanced:[{torch:true}]}); }catch(e){}
-      await new Promise(r=>setTimeout(r,350));            // let exposure settle under the flash
-      blob=await grabFrame();
-      try{ await cam.track.applyConstraints({advanced:[{torch:false}]}); }catch(e){}
-    } else if(cam.ic){ try{
-      const o={}; if(flash&&cam.caps&&cam.caps.fillLightMode&&cam.caps.fillLightMode.includes("flash")) o.fillLightMode="flash";
-      blob=await cam.ic.takePhoto(o);
-    }catch(e){ blob=null; } }
+    let blob=null, how="";
+    if(flash){
+      // 1) flash LED as a torch (works on most Android phones in Chrome)
+      if(await torch(true)){
+        await new Promise(r=>setTimeout(r,380));          // let exposure settle under the light
+        blob=await grabFrame(); await torch(false); how="LED";
+      }
+      // 2) the camera's own flash mode
+      if(!blob && cam.ic){ try{ blob=await cam.ic.takePhoto({fillLightMode:"flash"}); how="camera flash"; }catch(e){ blob=null; } }
+      // 3) last resort: screen flash
+      if(!blob){ screenFlash(); await new Promise(r=>setTimeout(r,60)); blob=await grabFrame(); how="screen (this browser gives no access to the LED)"; }
+      if(liveShot.told!==how){ liveShot.told=how; liveShot.say="Flash: "+how; }
+    } else if(cam.ic){ try{ blob=await cam.ic.takePhoto(); }catch(e){ blob=null; } }
     if(!blob) blob=await grabFrame();
     if(blob) blob=await uprightBlob(blob);
     if(!blob){ toast("Camera not ready"); return; }
     addShots([new File([blob],"shot.jpg",{type:"image/jpeg",lastModified:Date.now()})]);
+    if(liveShot.say){ toast(liveShot.say); liveShot.say=""; }
   });
 }
 document.addEventListener("visibilitychange",()=>{ if(!document.hidden && cam.ok && !(cam.stream&&cam.stream.active)){ cam.ok=null; startCam(); } });
