@@ -54,7 +54,7 @@
   #counter{background:#030303;border-radius:calc(var(--u)*8);box-shadow:inset 0 0 0 calc(var(--u)*2) #262626,inset 0 calc(var(--u)*6) calc(var(--u)*10) rgba(0,0,0,.9);
     display:flex;align-items:center;justify-content:center;font:600 calc(var(--u)*34) "IBM Plex Mono",monospace;color:#ff8a2a;text-shadow:0 0 calc(var(--u)*10) rgba(255,120,30,.6)}
   #eye{border-radius:calc(var(--u)*6);overflow:hidden;pointer-events:none}
-  #eye video{display:none;width:100%;height:100%;object-fit:cover}
+  #eye video{display:none;position:absolute;left:50%;top:50%;width:100%;height:100%;object-fit:cover;transform:translate(-50%,-50%)}
   #eye.live video{display:block}
   #eye.live img{display:none}
   #eye img{width:100%;height:100%;object-fit:cover;opacity:.28;mix-blend-mode:screen;filter:blur(calc(var(--u)*1)) saturate(.8)}
@@ -275,6 +275,11 @@ function layoutRig(){
   w.style.width = cw + "px"; w.style.height = ch + "px";
   w.style.left = (W - cw)/2 + "px"; w.style.top = (H - ch)/2 + "px";
   document.documentElement.style.setProperty("--u", (cw / IW) + "px");
+  // keep the live viewfinder upright on screen: undo the rig rotation
+  const ev=$("eyeVid"), eye=$("eye"), side=Math.abs(S.rot)===90;
+  requestAnimationFrame(()=>{ const ew=eye.offsetWidth, eh=eye.offsetHeight;
+    ev.style.width=(side?eh:ew)+"px"; ev.style.height=(side?ew:eh)+"px";
+    ev.style.transform=`translate(-50%,-50%) rotate(${-S.rot}deg)`; });
   if ($("s-view").classList.contains("on")) dirty();
 }
 document.querySelectorAll("[data-r]").forEach(el => {
@@ -400,7 +405,7 @@ function fire(){
   audio();
   if (framesLeft()<=0){ toast(S.mode==="disp"?"Roll full. Tap DEVELOP.":"Roll full. Tap REWIND."); return; }
   sndShutter(); pressAnim();
-  if (S.flash){ const f=$("flashfx"); f.classList.remove("go"); void f.offsetWidth; f.classList.add("go"); }
+  if (S.flash && !(cam.ok===true && cam.torch)){ const f=$("flashfx"); f.classList.remove("go"); void f.offsetWidth; f.classList.add("go"); }
   // Never wait for the camera here: the file picker must open inside the same tap.
   if (cam.ok===true && cam.stream && cam.stream.active) { liveShot(); return; }
   $("capIn").click();
@@ -424,10 +429,25 @@ async function startCam(){
       new Promise((_,rej)=>setTimeout(()=>rej(new Error("camera timeout")),8000))
     ]);
     cam.stream=st; const v=$("eyeVid"); v.srcObject=st; try{ await v.play(); }catch(e){}
-    const tr=st.getVideoTracks()[0];
+    const tr=st.getVideoTracks()[0]; cam.track=tr;
+    try{ const c=tr.getCapabilities?tr.getCapabilities():{}; cam.torch=!!c.torch; }catch(e){ cam.torch=false; }
     if("ImageCapture" in window){ try{ cam.ic=new ImageCapture(tr); cam.caps=await cam.ic.getPhotoCapabilities().catch(()=>null); }catch(e){ cam.ic=null; } }
     cam.ok=true; $("eye").classList.add("live"); return true;
   }catch(e){ cam.ok=false; $("eye").classList.remove("live"); return false; }
+}
+/* Turn a captured frame so it is upright for the person holding the phone sideways */
+async function uprightBlob(blob){
+  const rot=S.rot; if(!rot) return blob;
+  try{
+    const v=$("eyeVid"), bmp=await createImageBitmap(blob,{imageOrientation:"from-image"});
+    const vidPortrait=v.videoHeight>v.videoWidth, imgPortrait=bmp.height>bmp.width;
+    if(Math.abs(rot)===90 && vidPortrait!==imgPortrait){ bmp.close&&bmp.close(); return blob; }
+    const side=Math.abs(rot)===90, c=document.createElement("canvas");
+    c.width=side?bmp.height:bmp.width; c.height=side?bmp.width:bmp.height;
+    const x=c.getContext("2d"); x.translate(c.width/2,c.height/2); x.rotate(-rot*Math.PI/180); x.drawImage(bmp,-bmp.width/2,-bmp.height/2);
+    bmp.close&&bmp.close();
+    return await new Promise(r=>c.toBlob(b=>r(b||blob),"image/jpeg",.95));
+  }catch(e){ return blob; }
 }
 function grabFrame(){
   const v=$("eyeVid"); if(!v.videoWidth) return Promise.resolve(null);
@@ -439,11 +459,18 @@ function liveShot(){
   const flash=S.flash;
   cam.busy=cam.busy.then(async()=>{
     let blob=null;
-    if(cam.ic){ try{
+    const useTorch=flash&&cam.torch;
+    if(useTorch){
+      try{ await cam.track.applyConstraints({advanced:[{torch:true}]}); }catch(e){}
+      await new Promise(r=>setTimeout(r,350));            // let exposure settle under the flash
+      blob=await grabFrame();
+      try{ await cam.track.applyConstraints({advanced:[{torch:false}]}); }catch(e){}
+    } else if(cam.ic){ try{
       const o={}; if(flash&&cam.caps&&cam.caps.fillLightMode&&cam.caps.fillLightMode.includes("flash")) o.fillLightMode="flash";
       blob=await cam.ic.takePhoto(o);
     }catch(e){ blob=null; } }
     if(!blob) blob=await grabFrame();
+    if(blob) blob=await uprightBlob(blob);
     if(!blob){ toast("Camera not ready"); return; }
     addShots([new File([blob],"shot.jpg",{type:"image/jpeg",lastModified:Date.now()})]);
   });
