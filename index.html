@@ -173,6 +173,7 @@
     <button class="ov pb" id="rollBtn" data-r="1130,902,370,66"><img id="rollThumb" alt="" style="display:none"><span id="rollTxt">ROLL · 0</span></button>
   </div>
   <button id="flip" aria-label="Flip orientation">⟲</button>
+  <div id="ver" style="position:absolute;left:10px;top:12px;font:500 10px 'IBM Plex Mono',monospace;color:#9a958e;letter-spacing:.1em">FILMLAB V9</div>
   <input id="capIn" type="file" accept="image/*" capture="environment">
   <input id="galIn" type="file" accept="image/*" multiple>
 </section>
@@ -227,7 +228,7 @@ window.addEventListener("unhandledrejection",e=>{ try{ const t=document.getEleme
 (() => {
 "use strict";
 const $ = id => document.getElementById(id);
-const ROLL = 27, IW = 1627, IH = 1013;
+const ROLL = 27, IW = 1627, IH = 1013, APPV = "v9";
 
 /* =================== Films =================== */
 const FILMS = [
@@ -448,9 +449,24 @@ async function startCam(){
 }
 function screenFlash(){ const f=$("flashfx"); f.classList.remove("go"); void f.offsetWidth; f.classList.add("go"); }
 async function torch(on){
-  try{ await cam.track.applyConstraints({advanced:[{torch:on}]}); }catch(e){ return false; }
-  await new Promise(r=>setTimeout(r,60));
-  try{ const st=cam.track.getSettings(); return on ? st.torch===true : true; }catch(e){ return false; }
+  let ok=false;
+  try{ await cam.track.applyConstraints({advanced:[{torch:on}]}); ok=true; }catch(e){ cam.lastErr=String(e&&e.message||e); }
+  if(!ok){ try{ await cam.track.applyConstraints({torch:on}); ok=true; }catch(e){ cam.lastErr=String(e&&e.message||e); } }
+  if(!ok) return false;
+  await new Promise(r=>setTimeout(r,80));
+  try{ const st=cam.track.getSettings(); if(on && st.torch===false && !cam.torch) return false; }catch(e){}
+  return true;
+}
+/* Camera report: tap the frame counter */
+async function camReport(){
+  if(!cam.ok){ toast("No live camera here. Open the GitHub address."); return; }
+  let c={},st={},pc=null;
+  try{ c=cam.track.getCapabilities(); }catch(e){} try{ st=cam.track.getSettings(); }catch(e){}
+  try{ pc=cam.ic?await cam.ic.getPhotoCapabilities():null; }catch(e){}
+  const devs=(await navigator.mediaDevices.enumerateDevices()).filter(d=>d.kind==="videoinput").map(d=>d.label||"?");
+  const msg=`${APPV} · cam: ${cam.track.label} · torch cap: ${!!c.torch} · torch now: ${st.torch} · flash modes: ${pc&&pc.fillLightMode?pc.fillLightMode.join("/"):"none"} · ${devs.length} cameras${cam.lastErr?" · err: "+cam.lastErr:""}`;
+  const t=$("toast"); t.textContent=msg; t.style.whiteSpace="normal"; t.style.width="90%"; t.classList.add("show");
+  clearTimeout(toast.t); toast.t=setTimeout(()=>{ t.classList.remove("show"); t.style.whiteSpace=""; t.style.width=""; },9000);
 }
 /* Find the back camera that owns the flash LED (Pixel has several back cameras) */
 async function findTorchCamera(){
@@ -519,6 +535,7 @@ function liveShot(){
 }
 document.addEventListener("visibilitychange",()=>{ if(!document.hidden && cam.ok && !(cam.stream&&cam.stream.active)){ cam.ok=null; startCam(); } });
 tap($("dome"),fire); tap($("bigShutter"),fire);
+tap($("counter"),camReport);
 tap($("galBtn"),()=>{ audio(); $("galIn").click(); });
 $("capIn").addEventListener("change",e=>{ const f=e.target.files&&e.target.files[0]; e.target.value=""; if(f) addShots([f]); });
 $("galIn").addEventListener("change",e=>{ const fs=[...(e.target.files||[])]; e.target.value=""; if(fs.length) addShots(fs); });
