@@ -16,13 +16,13 @@
   html,body{margin:0;height:100%;overflow:hidden;background:#0b0a09;color:var(--text);font-family:Inter,system-ui,sans-serif;user-select:none;-webkit-user-select:none;touch-action:none}
   button{font-family:inherit;touch-action:none}
   #rig{position:fixed;left:0;top:0;transform-origin:0 0;overflow:hidden;
-    background:radial-gradient(120% 120% at 50% 40%,#3a3632 0%,#1c1a18 55%,#0d0c0b 100%)}
+    background:radial-gradient(120% 120% at 50% 35%,#ffffff 0%,#f1f0ee 45%,#d9d7d3 100%)}
   .screen{position:absolute;inset:0;display:none}
   .screen.on{display:block}
 
   /* ================= camera ================= */
   #wrap{position:absolute;aspect-ratio:1627/1013}
-  #wrap>img.skin{position:absolute;inset:0;width:100%;height:100%;filter:drop-shadow(0 calc(var(--u)*40) calc(var(--u)*50) rgba(0,0,0,.7))}
+  #wrap>img.skin{position:absolute;inset:0;width:100%;height:100%;filter:drop-shadow(0 calc(var(--u)*30) calc(var(--u)*40) rgba(0,0,0,.28))}
   .ov{position:absolute}
   .eng{font:600 calc(var(--u)*20) "IBM Plex Mono",monospace;letter-spacing:.16em;color:#d8d2c8;opacity:.78}
 
@@ -88,7 +88,7 @@
   #modeSw span.on{background:#2e2924;color:#f2ede4}
   #modeSw span.on.d{background:var(--accent);color:#1b0f04}
   #rollBtn img{height:calc(var(--u)*44);border-radius:calc(var(--u)*4)}
-  #flip{position:absolute;right:10px;top:8px;width:34px;height:34px;border-radius:50%;border:1px solid #333;background:rgba(0,0,0,.4);color:#aaa;font-size:16px;cursor:pointer;z-index:5}
+  #flip{position:absolute;right:10px;top:8px;width:34px;height:34px;border-radius:50%;border:1px solid #c9c6c1;background:rgba(255,255,255,.6);color:#555;font-size:16px;cursor:pointer;z-index:5}
 
   /* ================= roll ================= */
   .bar{position:absolute;left:0;right:0;top:0;height:50px;display:flex;align-items:center;gap:8px;padding:0 12px;border-bottom:1px solid var(--line);background:#100e0d;z-index:2}
